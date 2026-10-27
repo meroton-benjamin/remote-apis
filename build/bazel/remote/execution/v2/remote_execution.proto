@@ -737,6 +737,23 @@ message Action {
   // as those in the [Command][build.bazel.remote.execution.v2.Command]. Servers
   // SHOULD prefer those set here.
   Platform platform = 10;
+
+  // Optional, advisory hints for the execution environment. Unlike
+  // [platform][build.bazel.remote.execution.v2.Action.platform], these are not
+  // requirements: the server MAY ignore any hint it does not understand or
+  // cannot satisfy, and MUST NOT reject the action solely because of an
+  // unknown hint.
+  //
+  // Because this field is part of the
+  // [Action][build.bazel.remote.execution.v2.Action], hints set here are part
+  // of the action digest and therefore affect the action cache key. Clients
+  // SHOULD only use these hints when a different hint value may legitimately
+  // require a different cached result, or when they otherwise want to split
+  // the cache per hint value. For hints that only affect scheduling or
+  // routing and never the result, use
+  // [ExecuteRequest.execution_hints][build.bazel.remote.execution.v2.ExecuteRequest.execution_hints]
+  // instead.
+  PlatformHints platform_hints = 11;
 }
 
 // A `Command` is the actual command executed by a worker running an
@@ -967,6 +984,55 @@ message Platform {
   // be lexicographically sorted by name, and then by value. Sorting of strings
   // is done by code point, equivalently, by the UTF-8 bytes.
   repeated Property properties = 1;
+}
+
+// `PlatformHints` is a set of optional, advisory key-value pairs describing
+// preferences for how an [Action][build.bazel.remote.execution.v2.Action]
+// should be executed. Unlike [Platform][build.bazel.remote.execution.v2.Platform]
+// properties, hints are not requirements: a server MAY ignore any hint it does
+// not recognize or cannot satisfy, and MUST NOT reject an action solely because
+// it carries an unknown hint. Hints are intended for use cases such as:
+//
+// * Resource hints: the action would benefit from, or prefers, a worker with
+//   at least a given amount of RAM, CPU, or other resource. A hint is not a
+//   guarantee; clients MUST NOT rely on it for correctness.
+// * Routing hints: the action should preferably be scheduled on a worker that
+//   already has some state, such as a worker that recently fetched a similar
+//   input root.
+//
+// A hint that is not recognized by the server MUST be ignored. If a hint is
+// recognized but cannot be honored, the server SHOULD fall back to its default
+// behavior rather than failing the execution.
+//
+// Hints may be supplied in two places, depending on whether they should affect
+// the action cache key:
+//
+// * [Action.platform_hints][build.bazel.remote.execution.v2.Action.platform_hints]
+//   is part of the action digest. Hints placed there split the action cache:
+//   two otherwise identical actions carrying different hint values are
+//   different actions. Use this only when the hint may legitimately change the
+//   result of the action, or when the client explicitly wants a separate cache
+//   entry per hint value.
+// * [ExecuteRequest.execution_hints][build.bazel.remote.execution.v2.ExecuteRequest.execution_hints]
+//   is not part of the action digest and therefore does not affect the action
+//   cache key. Use this for scheduling and routing hints that never change the
+//   result of the action.
+message PlatformHints {
+  // A single hint for the execution environment.
+  message Hint {
+    // The hint name. Servers are responsible for specifying the hint `name`s
+    // that they understand. Unknown names MUST be ignored.
+    string name = 1;
+
+    // The hint value. The interpretation of the value is server-dependent.
+    string value = 2;
+  }
+
+  // The hints that make up this set. In order to ensure that equivalent
+  // `PlatformHints` always hash to the same value, the hints MUST be
+  // lexicographically sorted by name, and then by value. Sorting of strings is
+  // done by code point, equivalently, by the UTF-8 bytes.
+  repeated Hint hints = 1;
 }
 
 // A `Directory` represents a directory node in a file tree, containing zero or
@@ -1641,6 +1707,31 @@ message ExecuteRequest {
   // `output_files` (DEPRECATED since v2.1) in the
   // [Command][build.bazel.remote.execution.v2.Command] message.
   repeated string inline_output_files = 12;
+
+  // Optional, advisory hints for the execution environment. Unlike
+  // [platform][build.bazel.remote.execution.v2.Action.platform] properties,
+  // these are not requirements: the server MAY ignore any hint it does not
+  // understand or cannot satisfy, and MUST NOT reject the request solely
+  // because of an unknown hint.
+  //
+  // Because this field is part of the
+  // [ExecuteRequest][build.bazel.remote.execution.v2.ExecuteRequest] and not of
+  // the [Action][build.bazel.remote.execution.v2.Action], hints set here are
+  // not part of the action digest and do not affect the action cache key. This
+  // makes this field appropriate for scheduling and routing hints that never
+  // change the result of the action, such as preferring a worker that already
+  // has a particular persistent worker state or a similar input root.
+  //
+  // Hints that may legitimately change the result of the action, and that
+  // should therefore split the action cache, belong in
+  // [Action.platform_hints][build.bazel.remote.execution.v2.Action.platform_hints]
+  // instead.
+  //
+  // If the same hint name is present in both this field and
+  // [Action.platform_hints][build.bazel.remote.execution.v2.Action.platform_hints],
+  // the server SHOULD prefer the value from the action, as that value is part
+  // of the action digest.
+  PlatformHints execution_hints = 13;
 }
 
 // A `LogFile` is a log stored in the CAS.
